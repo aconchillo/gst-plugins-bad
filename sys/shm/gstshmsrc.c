@@ -253,6 +253,7 @@ gst_shm_src_start_reading (GstShmSrc * self)
     return FALSE;
   }
 
+  GST_OBJECT_LOCK (self);
   self->pipe = gstpipe;
 
   gst_poll_set_flushing (self->poll, FALSE);
@@ -261,6 +262,7 @@ gst_shm_src_start_reading (GstShmSrc * self)
   self->pollfd.fd = sp_get_fd (self->pipe->pipe);
   gst_poll_add_fd (self->poll, &self->pollfd);
   gst_poll_fd_ctl_read (self->poll, &self->pollfd, TRUE);
+  GST_OBJECT_UNLOCK (self);
 
   return TRUE;
 }
@@ -270,8 +272,11 @@ gst_shm_src_stop_reading (GstShmSrc * self)
 {
   GST_DEBUG_OBJECT (self, "Stopping %p", self);
 
+  GST_OBJECT_LOCK (self);
   if (self->pipe) {
+    GST_OBJECT_UNLOCK (self);
     gst_shm_pipe_dec (self->pipe);
+    GST_OBJECT_LOCK (self);
     self->pipe = NULL;
 
     gst_poll_remove_fd (self->poll, &self->pollfd);
@@ -279,6 +284,7 @@ gst_shm_src_stop_reading (GstShmSrc * self)
 
   gst_poll_fd_init (&self->pollfd);
   gst_poll_set_flushing (self->poll, TRUE);
+  GST_OBJECT_UNLOCK (self);
 }
 
 static gboolean
@@ -326,7 +332,9 @@ gst_shm_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   int rv = 0;
   struct GstShmBuffer *gsb;
 
+  GST_OBJECT_LOCK (self);
   do {
+    GST_OBJECT_UNLOCK (self);
     if (gst_poll_wait (self->poll, GST_CLOCK_TIME_NONE) < 0) {
       if (errno == EBUSY)
         return GST_FLOW_FLUSHING;
@@ -334,33 +342,25 @@ gst_shm_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
           ("Poll failed on fd: %s", strerror (errno)));
       return GST_FLOW_ERROR;
     }
+    GST_OBJECT_LOCK (self);
 
-    if (self->unlocked)
+    if (self->unlocked || self->pipe == NULL) {
+      GST_OBJECT_UNLOCK (self);
       return GST_FLOW_FLUSHING;
-
-    if (gst_poll_fd_has_closed (self->poll, &self->pollfd)) {
-      GST_ELEMENT_ERROR (self, RESOURCE, READ, ("Failed to read from shmsrc"),
-          ("Control socket has closed"));
-      return GST_FLOW_ERROR;
     }
 
-    if (gst_poll_fd_has_error (self->poll, &self->pollfd)) {
-      GST_ELEMENT_ERROR (self, RESOURCE, READ, ("Failed to read from shmsrc"),
-          ("Control socket has error"));
-      return GST_FLOW_ERROR;
-    }
+    if (gst_poll_fd_has_closed (self->poll, &self->pollfd))
+      goto socket_closed;
+
+    if (gst_poll_fd_has_error (self->poll, &self->pollfd))
+      goto socket_error;
 
     if (gst_poll_fd_can_read (self->poll, &self->pollfd)) {
       buf = NULL;
       GST_LOG_OBJECT (self, "Reading from pipe");
-      GST_OBJECT_LOCK (self);
       rv = sp_client_recv (self->pipe->pipe, &buf);
-      GST_OBJECT_UNLOCK (self);
-      if (rv < 0) {
-        GST_ELEMENT_ERROR (self, RESOURCE, READ, ("Failed to read from shmsrc"),
-            ("Error reading control data: %d", rv));
-        return GST_FLOW_ERROR;
-      }
+      if (rv < 0)
+        goto recv_error;
     }
   } while (buf == NULL);
 
@@ -369,12 +369,36 @@ gst_shm_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   gsb = g_slice_new0 (struct GstShmBuffer);
   gsb->buf = buf;
   gsb->pipe = self->pipe;
+  GST_OBJECT_UNLOCK (self);
+
   gst_shm_pipe_inc (self->pipe);
 
   *outbuf = gst_buffer_new_wrapped_full (GST_MEMORY_FLAG_READONLY,
       buf, rv, 0, rv, gsb, free_buffer);
 
   return GST_FLOW_OK;
+
+socket_closed:
+  {
+    GST_OBJECT_UNLOCK (self);
+    GST_ELEMENT_ERROR (self, RESOURCE, READ, ("Failed to read from shmsrc"),
+        ("Control socket has closed"));
+    return GST_FLOW_ERROR;
+  }
+socket_error:
+  {
+    GST_OBJECT_UNLOCK (self);
+    GST_ELEMENT_ERROR (self, RESOURCE, READ, ("Failed to read from shmsrc"),
+        ("Control socket has error"));
+    return GST_FLOW_ERROR;
+  }
+recv_error:
+  {
+    GST_OBJECT_UNLOCK (self);
+    GST_ELEMENT_ERROR (self, RESOURCE, READ, ("Failed to read from shmsrc"),
+        ("Error reading control data: %d", rv));
+    return GST_FLOW_ERROR;
+  }
 }
 
 static GstStateChangeReturn
@@ -412,8 +436,10 @@ gst_shm_src_unlock (GstBaseSrc * bsrc)
 {
   GstShmSrc *self = GST_SHM_SRC (bsrc);
 
+  GST_OBJECT_LOCK (self);
   self->unlocked = TRUE;
   gst_poll_set_flushing (self->poll, TRUE);
+  GST_OBJECT_UNLOCK (self);
 
   return TRUE;
 }
@@ -423,8 +449,10 @@ gst_shm_src_unlock_stop (GstBaseSrc * bsrc)
 {
   GstShmSrc *self = GST_SHM_SRC (bsrc);
 
+  GST_OBJECT_LOCK (self);
   self->unlocked = FALSE;
   gst_poll_set_flushing (self->poll, FALSE);
+  GST_OBJECT_UNLOCK (self);
 
   return TRUE;
 }
