@@ -625,6 +625,10 @@ static gboolean
 _execute_op (GstWebRTCBinTask * op)
 {
   PC_LOCK (op->webrtc);
+  if (!op->webrtc->priv->running) {
+    GST_DEBUG_OBJECT (op->webrtc, "Element is not running, aborting execution");
+    goto out;
+  }
   if (op->webrtc->priv->is_closed) {
     GST_DEBUG_OBJECT (op->webrtc,
         "Peerconnection is closed, aborting execution");
@@ -3779,6 +3783,8 @@ gst_webrtc_bin_change_state (GstElement * element, GstStateChange transition)
       break;
     case GST_STATE_CHANGE_PAUSED_TO_READY:
       webrtc->priv->running = FALSE;
+      PC_LOCK (webrtc);
+      PC_UNLOCK (webrtc);
       break;
     default:
       break;
