@@ -74,6 +74,7 @@
 
 
 #define LISTEN_BACKLOG 10
+#define ASYNC_RETRIES 5
 
 enum
 {
@@ -475,14 +476,19 @@ static int
 send_command (int fd, struct CommandBuffer *cb, unsigned short int type,
     int area_id)
 {
+  int retval;
+  int retries = ASYNC_RETRIES;
+
   cb->type = type;
   cb->area_id = area_id;
 
-  if (send (fd, cb, sizeof (struct CommandBuffer), MSG_NOSIGNAL) !=
-      sizeof (struct CommandBuffer))
-    return 0;
-
-  return 1;
+  while (retries > 0) {
+    retval = send (fd, cb, sizeof (struct CommandBuffer), 0);
+    if ((retval != EAGAIN) && (retval != EWOULDBLOCK))
+      break;
+    retries--;
+  }
+  return (retval == sizeof (struct CommandBuffer));
 }
 
 int
@@ -643,13 +649,15 @@ static int
 recv_command (int fd, struct CommandBuffer *cb)
 {
   int retval;
+  int retries = ASYNC_RETRIES;
 
-  retval = recv (fd, cb, sizeof (struct CommandBuffer), MSG_DONTWAIT);
-  if (retval == sizeof (struct CommandBuffer)) {
-    return 1;
-  } else {
-    return 0;
+  while (retries > 0) {
+    retval = recv (fd, cb, sizeof (struct CommandBuffer), 0);
+    if ((retval != EAGAIN) && (retval != EWOULDBLOCK))
+      break;
+    retries--;
   }
+  return (retval == sizeof (struct CommandBuffer));
 }
 
 long int
@@ -787,7 +795,7 @@ sp_client_open (const char *path)
   if (flags < 0)
     goto error;
 
-  if (fcntl (self->main_socket, F_SETFL, flags | FD_CLOEXEC) < 0)
+  if (fcntl (self->main_socket, F_SETFL, flags | O_NONBLOCK | FD_CLOEXEC) < 0)
     goto error;
 
   sock_un.sun_family = AF_UNIX;
