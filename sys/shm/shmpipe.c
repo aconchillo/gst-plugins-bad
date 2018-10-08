@@ -787,7 +787,7 @@ sp_client_open (const char *path)
   if (flags < 0)
     goto error;
 
-  if (fcntl (self->main_socket, F_SETFL, flags | FD_CLOEXEC) < 0)
+  if (fcntl (self->main_socket, F_SETFL, flags | O_NONBLOCK | FD_CLOEXEC) < 0)
     goto error;
 
   sock_un.sun_family = AF_UNIX;
