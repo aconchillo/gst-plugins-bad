@@ -351,6 +351,7 @@ enum
   PROP_PENDING_REMOTE_DESCRIPTION,
   PROP_STUN_SERVER,
   PROP_TURN_SERVER,
+  PROP_ICE_ADDRESSES,
 };
 
 static guint gst_webrtc_bin_signals[LAST_SIGNAL] = { 0 };
@@ -4589,6 +4590,7 @@ gst_webrtc_bin_set_property (GObject * object, guint prop_id,
   switch (prop_id) {
     case PROP_STUN_SERVER:
     case PROP_TURN_SERVER:
+    case PROP_ICE_ADDRESSES:
       g_object_set_property (G_OBJECT (webrtc->priv->ice), pspec->name, value);
       break;
     default:
@@ -4647,6 +4649,7 @@ gst_webrtc_bin_get_property (GObject * object, guint prop_id,
       break;
     case PROP_STUN_SERVER:
     case PROP_TURN_SERVER:
+    case PROP_ICE_ADDRESSES:
       g_object_get_property (G_OBJECT (webrtc->priv->ice), pspec->name, value);
       break;
     default:
@@ -4793,6 +4796,12 @@ gst_webrtc_bin_class_init (GstWebRTCBinClass * klass)
           "This is a convenience property, use #GstWebRTCBin::add-turn-server "
           "if you wish to use multiple TURN servers",
           NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class,
+      PROP_ICE_ADDRESSES,
+      g_param_spec_boxed ("ice-addresses", "ICE network addresses",
+          "Local newtork addresses used for ICE gathering",
+          G_TYPE_STRV, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
       PROP_CONNECTION_STATE,

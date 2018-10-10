@@ -57,6 +57,7 @@ enum
   PROP_ICE_GATHERING_STATE,
   PROP_STUN_SERVER,
   PROP_TURN_SERVER,
+  PROP_ICE_ADDRESSES,
   PROP_CONTROLLER,
   PROP_AGENT,
 };
@@ -787,6 +788,31 @@ out:
 }
 
 static void
+_set_ice_addresses (GstWebRTCICE * ice, gchar ** addresses)
+{
+  guint i = 0;
+
+  g_assert (ice != NULL);
+  g_assert (addresses != NULL);
+
+  GST_DEBUG_OBJECT (ice, "Setting ICE local addresses");
+
+  if (ice->ice_addresses)
+    g_strfreev (ice->ice_addresses);
+  ice->ice_addresses = addresses;
+
+  for (i = 0; i < g_strv_length (addresses); i++) {
+    NiceAddress nice_addr;
+
+    GST_DEBUG_OBJECT (ice, "Adding ICE local address %s", addresses[i]);
+
+    nice_address_init (&nice_addr);
+    nice_address_set_from_string (&nice_addr, addresses[i]);
+    nice_agent_add_local_address (ice->priv->nice_agent, &nice_addr);
+  }
+}
+
+static void
 gst_webrtc_ice_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
@@ -820,6 +846,9 @@ gst_webrtc_ice_set_property (GObject * object, guint prop_id,
       }
       break;
     }
+    case PROP_ICE_ADDRESSES:
+      _set_ice_addresses (ice, g_value_dup_boxed (value));
+      break;
     case PROP_CONTROLLER:
       g_object_set_property (G_OBJECT (ice->priv->nice_agent),
           "controlling-mode", value);
@@ -849,6 +878,9 @@ gst_webrtc_ice_get_property (GObject * object, guint prop_id,
       else
         g_value_take_string (value, NULL);
       break;
+    case PROP_ICE_ADDRESSES:
+      g_value_set_boxed (value, ice->ice_addresses);
+      break;
     case PROP_CONTROLLER:
       g_object_get_property (G_OBJECT (ice->priv->nice_agent),
           "controlling-mode", value);
@@ -875,6 +907,9 @@ gst_webrtc_ice_finalize (GObject * object)
     gst_uri_unref (ice->turn_server);
   if (ice->stun_server)
     gst_uri_unref (ice->stun_server);
+
+  if (ice->ice_addresses)
+    g_strfreev (ice->ice_addresses);
 
   g_mutex_clear (&ice->priv->lock);
   g_cond_clear (&ice->priv->cond);
@@ -910,6 +945,12 @@ gst_webrtc_ice_class_init (GstWebRTCICEClass * klass)
           NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
+      PROP_ICE_ADDRESSES,
+      g_param_spec_boxed ("ice-addresses", "ICE network addresses",
+          "Local newtork addresses used for ICE gathering",
+          G_TYPE_STRV, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class,
       PROP_CONTROLLER,
       g_param_spec_boolean ("controller", "ICE controller",
           "Whether the ICE agent is the controller or controlled. "
@@ -940,6 +981,8 @@ gst_webrtc_ice_init (GstWebRTCICE * ice)
 
   g_mutex_init (&ice->priv->lock);
   g_cond_init (&ice->priv->cond);
+
+  ice->ice_addresses = NULL;
 
   ice->turn_servers =
       g_hash_table_new_full (g_str_hash, g_str_equal, g_free,

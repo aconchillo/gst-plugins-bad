@@ -50,6 +50,8 @@ struct _GstWebRTCICE
 
   GHashTable                       *turn_servers;
 
+  gchar                           **ice_addresses;
+
   GstWebRTCICEPrivate              *priv;
 };
 

@@ -26,6 +26,7 @@
 #include "utils.h"
 #include "gstwebrtcbin.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define IS_EMPTY_SDP_ATTRIBUTE(val) (val == NULL || g_strcmp0(val, "") == 0)
